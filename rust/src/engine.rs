@@ -1,12 +1,11 @@
 use jni::JNIEnv;
-use jni::objects::JObject;
+use jni::objects::{JObject, JString};
 use log::{info, debug, warn};
 use regex::RegexSet;
 use std::time::{Duration, Instant};
 
 use crate::config::AppConfig;
 
-/// 默认匹配关键词
 const DEFAULT_KEYWORDS: &[&str] = &[
     r"跳过",
     r"SKIP",
@@ -17,7 +16,6 @@ const DEFAULT_KEYWORDS: &[&str] = &[
     r"×",
 ];
 
-/// ACTION_CLICK 常量值，来自 AccessibilityNodeInfo
 const ACTION_CLICK: i32 = 16;
 
 pub struct AdEngine {
@@ -30,7 +28,7 @@ pub struct AdEngine {
 
 impl AdEngine {
     pub fn new() -> Self {
-        let patterns: Vec<&str> = DEFAULT_KEYWORDS.iter().map(|s| *s).collect();
+        let patterns: Vec<&str> = DEFAULT_KEYWORDS.iter().copied().collect();
         let keyword_set = RegexSet::new(&patterns).expect("Failed to compile keyword regex");
 
         AdEngine {
@@ -56,27 +54,20 @@ impl AdEngine {
     pub fn process(
         &mut self,
         env: &mut JNIEnv,
-        root: &JObject,
+        root: JObject,
         package: &str,
     ) -> Result<Option<String>, String> {
-        // 检查是否启用
         if !self.config.enabled {
             return Ok(None);
         }
-
-        // 检查黑名单
         if self.config.app_blacklist.iter().any(|a| a == package) {
             return Ok(None);
         }
-
-        // 检查白名单（如果有设置）
         if !self.config.app_whitelist.is_empty()
             && !self.config.app_whitelist.iter().any(|a| a == package)
         {
             return Ok(None);
         }
-
-        // 防抖：避免高频重复处理
         let elapsed = self.last_process_time.elapsed();
         if elapsed < Duration::from_millis(self.cooldown_ms) {
             return Ok(None);
@@ -85,7 +76,6 @@ impl AdEngine {
 
         debug!("Processing window: package={}", package);
 
-        // 递归遍历节点树
         match self.traverse_node(env, root, 0) {
             Ok(Some(keyword)) => {
                 self.match_count += 1;
@@ -106,23 +96,20 @@ impl AdEngine {
         }
     }
 
-    /// 递归遍历节点树，返回 Some(keyword) 表示找到并点击了跳过按钮
     fn traverse_node(
         &self,
         env: &mut JNIEnv,
-        node: &JObject,
+        node: JObject,
         depth: u32,
     ) -> Result<Option<String>, String> {
         if depth > 50 {
-            return Ok(None); // 防止过深递归
+            return Ok(None);
         }
 
-        // 获取节点文本
         let text = get_node_text(env, node).unwrap_or_default();
         let content_desc = get_content_description(env, node).unwrap_or_default();
         let combined = format!("{} {}", text, content_desc);
 
-        // 检查文本是否匹配跳过关键词
         if !combined.trim().is_empty() && self.keyword_set.is_match(&combined) {
             debug!(
                 "Matched node: text='{}' desc='{}' depth={}",
@@ -131,7 +118,6 @@ impl AdEngine {
 
             let keyword = combined.trim().to_string();
 
-            // 检查是否可点击
             if is_node_clickable(env, node).unwrap_or(false) {
                 match perform_click(env, node) {
                     Ok(true) => {
@@ -142,11 +128,10 @@ impl AdEngine {
                     Err(e) => warn!("Click failed: {}", e),
                 }
             } else {
-                // 如果节点本身不可点击，尝试点击其父节点
                 debug!("Node not clickable, trying parent");
                 if let Ok(parent) = get_parent(env, node) {
-                    if is_node_clickable(env, &parent).unwrap_or(false) {
-                        match perform_click(env, &parent) {
+                    if is_node_clickable(env, parent).unwrap_or(false) {
+                        match perform_click(env, parent) {
                             Ok(true) => {
                                 info!("Clicked parent of skip button: '{}'", keyword);
                                 return Ok(Some(keyword));
@@ -158,12 +143,11 @@ impl AdEngine {
             }
         }
 
-        // 递归处理子节点
         let child_count = get_child_count(env, node).unwrap_or(0);
         for i in 0..child_count {
             match get_child(env, node, i) {
                 Ok(child) => {
-                    if let Some(keyword) = self.traverse_node(env, &child, depth + 1)? {
+                    if let Some(keyword) = self.traverse_node(env, child, depth + 1)? {
                         return Ok(Some(keyword));
                     }
                 }
@@ -175,19 +159,17 @@ impl AdEngine {
     }
 }
 
-// ─── JNI 辅助函数 ──────────────────────────────────────────────
+// ─── JNI 辅助函数 — 全部用 JObject 值传递 (jni 0.21 要求 Into<JObject>) ─────
 
-fn get_node_text(env: &mut JNIEnv, node: &JObject) -> Result<String, String> {
+fn get_node_text(env: &mut JNIEnv, node: JObject) -> Result<String, String> {
     let text_obj = env
         .call_method(node, "getText", "()Ljava/lang/CharSequence;", &[])
         .map_err(|e| format!("getText failed: {e}"))?;
 
-    // getText 可能返回 null
     let text_jobj = match text_obj.l() {
         Ok(jobj) => jobj,
         Err(_) => return Ok(String::new()),
     };
-
     if text_jobj.is_null() {
         return Ok(String::new());
     }
@@ -197,7 +179,7 @@ fn get_node_text(env: &mut JNIEnv, node: &JObject) -> Result<String, String> {
         .map_err(|e| format!("toString failed: {e}"))?;
 
     let s: String = env
-        .get_string(&jni::objects::JString::from(
+        .get_string(&JString::from(
             text_str.l().map_err(|e| format!("get_string: {e}"))?,
         ))
         .map_err(|e| format!("get_string: {e}"))?
@@ -206,21 +188,15 @@ fn get_node_text(env: &mut JNIEnv, node: &JObject) -> Result<String, String> {
     Ok(s)
 }
 
-fn get_content_description(env: &mut JNIEnv, node: &JObject) -> Result<String, String> {
+fn get_content_description(env: &mut JNIEnv, node: JObject) -> Result<String, String> {
     let desc_obj = env
-        .call_method(
-            node,
-            "getContentDescription",
-            "()Ljava/lang/CharSequence;",
-            &[],
-        )
+        .call_method(node, "getContentDescription", "()Ljava/lang/CharSequence;", &[])
         .map_err(|e| format!("getContentDescription failed: {e}"))?;
 
     let desc_jobj = match desc_obj.l() {
         Ok(jobj) => jobj,
         Err(_) => return Ok(String::new()),
     };
-
     if desc_jobj.is_null() {
         return Ok(String::new());
     }
@@ -230,7 +206,7 @@ fn get_content_description(env: &mut JNIEnv, node: &JObject) -> Result<String, S
         .map_err(|e| format!("toString failed: {e}"))?;
 
     let s: String = env
-        .get_string(&jni::objects::JString::from(
+        .get_string(&JString::from(
             desc_str.l().map_err(|e| format!("get_string: {e}"))?,
         ))
         .map_err(|e| format!("get_string: {e}"))?
@@ -239,14 +215,14 @@ fn get_content_description(env: &mut JNIEnv, node: &JObject) -> Result<String, S
     Ok(s)
 }
 
-fn is_node_clickable(env: &mut JNIEnv, node: &JObject) -> Result<bool, String> {
+fn is_node_clickable(env: &mut JNIEnv, node: JObject) -> Result<bool, String> {
     let clickable = env
         .call_method(node, "isClickable", "()Z", &[])
         .map_err(|e| format!("isClickable failed: {e}"))?;
     Ok(clickable.z().unwrap_or(false))
 }
 
-fn get_child_count(env: &mut JNIEnv, node: &JObject) -> Result<i32, String> {
+fn get_child_count(env: &mut JNIEnv, node: JObject) -> Result<i32, String> {
     let count = env
         .call_method(node, "getChildCount", "()I", &[])
         .map_err(|e| format!("getChildCount failed: {e}"))?;
@@ -255,7 +231,7 @@ fn get_child_count(env: &mut JNIEnv, node: &JObject) -> Result<i32, String> {
 
 fn get_child<'a>(
     env: &'a mut JNIEnv,
-    node: &JObject,
+    node: JObject,
     index: i32,
 ) -> Result<JObject<'a>, String> {
     let child = env
@@ -264,14 +240,14 @@ fn get_child<'a>(
     child.l().map_err(|e| format!("getChild l(): {e}"))
 }
 
-fn get_parent<'a>(env: &'a mut JNIEnv, node: &JObject) -> Result<JObject<'a>, String> {
+fn get_parent<'a>(env: &'a mut JNIEnv, node: JObject) -> Result<JObject<'a>, String> {
     let parent = env
         .call_method(node, "getParent", "()Landroid/view/accessibility/AccessibilityNodeInfo;", &[])
         .map_err(|e| format!("getParent failed: {e}"))?;
     parent.l().map_err(|e| format!("getParent l(): {e}"))
 }
 
-fn perform_click(env: &mut JNIEnv, node: &JObject) -> Result<bool, String> {
+fn perform_click(env: &mut JNIEnv, node: JObject) -> Result<bool, String> {
     let result = env
         .call_method(node, "performAction", "(I)Z", &[(ACTION_CLICK).into()])
         .map_err(|e| format!("performAction(CLICK) failed: {e}"))?;

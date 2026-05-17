@@ -1,5 +1,5 @@
 use jni::JNIEnv;
-use jni::objects::JObject;
+use jni::objects::{JObject, JString};
 use serde::{Deserialize, Serialize};
 
 const PREFS_NAME: &str = "ad_skipper_prefs";
@@ -33,7 +33,7 @@ pub struct AppConfig {
 
 fn default_enabled() -> bool { true }
 fn default_true() -> bool { true }
-fn default_keywords() -> Vec<String> { Vec::new() } // 空则使用引擎内置默认
+fn default_keywords() -> Vec<String> { Vec::new() }
 
 impl Default for AppConfig {
     fn default() -> Self {
@@ -48,17 +48,15 @@ impl Default for AppConfig {
     }
 }
 
-/// 从 SharedPreferences 加载配置（通过 JNI 调用 Android Context）
-pub fn load_config(env: &mut JNIEnv, context: &JObject) -> Result<AppConfig, String> {
-    // 获取 SharedPreferences
+pub fn load_config(env: &mut JNIEnv, context: JObject) -> Result<AppConfig, String> {
     let prefs = get_shared_preferences(env, context)?;
 
-    let enabled = get_bool(env, &prefs, KEY_ENABLED, true)?;
-    let keywords_str = get_string(env, &prefs, KEY_KEYWORDS, "")?;
-    let delay_ms = get_long(env, &prefs, KEY_DELAY_MS, 0)?;
-    let whitelist_str = get_string(env, &prefs, KEY_WHITELIST, "")?;
-    let blacklist_str = get_string(env, &prefs, KEY_BLACKLIST, "")?;
-    let log_enabled = get_bool(env, &prefs, KEY_LOG_ENABLED, true)?;
+    let enabled = get_bool(env, prefs, KEY_ENABLED, true)?;
+    let keywords_str = get_string(env, prefs, KEY_KEYWORDS, "")?;
+    let delay_ms = get_long(env, prefs, KEY_DELAY_MS, 0)?;
+    let whitelist_str = get_string(env, prefs, KEY_WHITELIST, "")?;
+    let blacklist_str = get_string(env, prefs, KEY_BLACKLIST, "")?;
+    let log_enabled = get_bool(env, prefs, KEY_LOG_ENABLED, true)?;
 
     Ok(AppConfig {
         enabled,
@@ -70,31 +68,30 @@ pub fn load_config(env: &mut JNIEnv, context: &JObject) -> Result<AppConfig, Str
     })
 }
 
-/// 保存配置到 SharedPreferences
 pub fn save_config(
     env: &mut JNIEnv,
-    context: &JObject,
+    context: JObject,
     config: &AppConfig,
 ) -> Result<(), String> {
     let prefs = get_shared_preferences(env, context)?;
 
-    put_bool(env, &prefs, KEY_ENABLED, config.enabled)?;
-    put_string(env, &prefs, KEY_KEYWORDS, &config.keywords.join(","))?;
-    put_long(env, &prefs, KEY_DELAY_MS, config.auto_click_delay_ms as i64)?;
-    put_string(env, &prefs, KEY_WHITELIST, &config.app_whitelist.join(","))?;
-    put_string(env, &prefs, KEY_BLACKLIST, &config.app_blacklist.join(","))?;
-    put_bool(env, &prefs, KEY_LOG_ENABLED, config.log_enabled)?;
+    put_bool(env, prefs, KEY_ENABLED, config.enabled)?;
+    put_string(env, prefs, KEY_KEYWORDS, &config.keywords.join(","))?;
+    put_long(env, prefs, KEY_DELAY_MS, config.auto_click_delay_ms as i64)?;
+    put_string(env, prefs, KEY_WHITELIST, &config.app_whitelist.join(","))?;
+    put_string(env, prefs, KEY_BLACKLIST, &config.app_blacklist.join(","))?;
+    put_bool(env, prefs, KEY_LOG_ENABLED, config.log_enabled)?;
 
     Ok(())
 }
 
-// ─── JNI 辅助函数 ──────────────────────────────────────────────
+// ─── JNI helpers — all pass JObject by value for jni 0.21 ─────
 
 fn get_shared_preferences<'a>(
     env: &'a mut JNIEnv,
-    context: &JObject,
+    context: JObject,
 ) -> Result<JObject<'a>, String> {
-    let mode: i32 = 0; // MODE_PRIVATE
+    let mode: i32 = 0;
     let prefs = env
         .call_method(
             context,
@@ -112,7 +109,7 @@ fn get_shared_preferences<'a>(
     prefs.l().map_err(|e| format!("getSharedPreferences l(): {e}"))
 }
 
-fn get_bool(env: &mut JNIEnv, prefs: &JObject, key: &str, default: bool) -> Result<bool, String> {
+fn get_bool(env: &mut JNIEnv, prefs: JObject, key: &str, default: bool) -> Result<bool, String> {
     let val = env
         .call_method(
             prefs,
@@ -131,7 +128,7 @@ fn get_bool(env: &mut JNIEnv, prefs: &JObject, key: &str, default: bool) -> Resu
 
 fn get_string(
     env: &mut JNIEnv,
-    prefs: &JObject,
+    prefs: JObject,
     key: &str,
     default: &str,
 ) -> Result<String, String> {
@@ -156,7 +153,7 @@ fn get_string(
         return Ok(default.to_string());
     }
     let s: String = env
-        .get_string(&jni::objects::JString::from(jobj))
+        .get_string(&JString::from(jobj))
         .map_err(|e| format!("get_string: {e}"))?
         .into();
     Ok(s)
@@ -164,7 +161,7 @@ fn get_string(
 
 fn get_long(
     env: &mut JNIEnv,
-    prefs: &JObject,
+    prefs: JObject,
     key: &str,
     default: i64,
 ) -> Result<i64, String> {
@@ -184,15 +181,14 @@ fn get_long(
     Ok(val.j().unwrap_or(default))
 }
 
-fn put_bool(env: &mut JNIEnv, prefs: &JObject, key: &str, value: bool) -> Result<(), String> {
-    // 需要先获取 Editor
+fn put_bool(env: &mut JNIEnv, prefs: JObject, key: &str, value: bool) -> Result<(), String> {
     let editor = env
         .call_method(prefs, "edit", "()Landroid/content/SharedPreferences$Editor;", &[])
         .map_err(|e| format!("edit() failed: {e}"))?;
     let editor = editor.l().map_err(|e| format!("edit l(): {e}"))?;
 
     env.call_method(
-        &editor,
+        editor,
         "putBoolean",
         "(Ljava/lang/String;Z)Landroid/content/SharedPreferences$Editor;",
         &[
@@ -204,20 +200,20 @@ fn put_bool(env: &mut JNIEnv, prefs: &JObject, key: &str, value: bool) -> Result
     )
     .map_err(|e| format!("putBoolean({key}) failed: {e}"))?;
 
-    env.call_method(&editor, "apply", "()V", &[])
+    env.call_method(editor, "apply", "()V", &[])
         .map_err(|e| format!("apply() failed: {e}"))?;
 
     Ok(())
 }
 
-fn put_string(env: &mut JNIEnv, prefs: &JObject, key: &str, value: &str) -> Result<(), String> {
+fn put_string(env: &mut JNIEnv, prefs: JObject, key: &str, value: &str) -> Result<(), String> {
     let editor = env
         .call_method(prefs, "edit", "()Landroid/content/SharedPreferences$Editor;", &[])
         .map_err(|e| format!("edit() failed: {e}"))?;
     let editor = editor.l().map_err(|e| format!("edit l(): {e}"))?;
 
     env.call_method(
-        &editor,
+        editor,
         "putString",
         "(Ljava/lang/String;Ljava/lang/String;)Landroid/content/SharedPreferences$Editor;",
         &[
@@ -231,20 +227,20 @@ fn put_string(env: &mut JNIEnv, prefs: &JObject, key: &str, value: &str) -> Resu
     )
     .map_err(|e| format!("putString({key}) failed: {e}"))?;
 
-    env.call_method(&editor, "apply", "()V", &[])
+    env.call_method(editor, "apply", "()V", &[])
         .map_err(|e| format!("apply() failed: {e}"))?;
 
     Ok(())
 }
 
-fn put_long(env: &mut JNIEnv, prefs: &JObject, key: &str, value: i64) -> Result<(), String> {
+fn put_long(env: &mut JNIEnv, prefs: JObject, key: &str, value: i64) -> Result<(), String> {
     let editor = env
         .call_method(prefs, "edit", "()Landroid/content/SharedPreferences$Editor;", &[])
         .map_err(|e| format!("edit() failed: {e}"))?;
     let editor = editor.l().map_err(|e| format!("edit l(): {e}"))?;
 
     env.call_method(
-        &editor,
+        editor,
         "putLong",
         "(Ljava/lang/String;J)Landroid/content/SharedPreferences$Editor;",
         &[
@@ -256,7 +252,7 @@ fn put_long(env: &mut JNIEnv, prefs: &JObject, key: &str, value: i64) -> Result<
     )
     .map_err(|e| format!("putLong({key}) failed: {e}"))?;
 
-    env.call_method(&editor, "apply", "()V", &[])
+    env.call_method(editor, "apply", "()V", &[])
         .map_err(|e| format!("apply() failed: {e}"))?;
 
     Ok(())
