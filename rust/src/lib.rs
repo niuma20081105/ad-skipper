@@ -31,9 +31,6 @@ pub extern "system" fn Java_com_adskipper_MainService_nativeOnServiceConnected(
     _env: JNIEnv,
     _class: JClass,
 ) {
-    android_logger::init_once(
-        android_logger::Config::default().with_max_level(log::LevelFilter::Debug),
-    );
     info!("AccessibilityService connected");
 }
 

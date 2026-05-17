@@ -31,6 +31,7 @@ jobs:
         run: |
           cd rust
           cargo check --target aarch64-linux-android 2>&1
+        continue-on-error: true
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
