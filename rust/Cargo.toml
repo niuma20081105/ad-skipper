@@ -8,7 +8,7 @@ crate-type = ["cdylib"]
 name = "ad_skipper"
 
 [dependencies]
-jni = { version = "0.21", features = ["invocation"] }
+jni = "0.20"
 log = "0.4"
 android_logger = "0.14"
 serde = { version = "1", features = ["derive"] }
