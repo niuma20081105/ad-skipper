@@ -27,11 +27,10 @@ jobs:
       - name: Install Android Rust targets
         run: rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
 
-      - name: Check Rust syntax (fast feedback)
+      - name: Check Rust syntax
         run: |
           cd rust
           cargo check --target aarch64-linux-android 2>&1
-        continue-on-error: true
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
@@ -41,12 +40,16 @@ jobs:
 
       - name: Install Android NDK
         run: |
-          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --install "ndk;25.2.9519653" 2>&1 || true
+          $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --install "ndk;25.2.9519653" 2>&1
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/25.2.9519653" >> $GITHUB_ENV
 
       - name: Build Rust native libraries
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
         run: |
           cd rust
+          echo "NDK at: ${ANDROID_NDK_HOME:-$ANDROID_SDK_ROOT/ndk/25.2.9519653}"
+          export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$ANDROID_SDK_ROOT/ndk/25.2.9519653}"
           cargo ndk \
             -t arm64-v8a \
             -t armeabi-v7a \
