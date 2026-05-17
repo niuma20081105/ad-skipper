@@ -197,7 +197,9 @@ fn get_node_text(env: &mut JNIEnv, node: &JObject) -> Result<String, String> {
         .map_err(|e| format!("toString failed: {e}"))?;
 
     let s: String = env
-        .get_string(&text_str.l().map_err(|e| format!("get_string: {e}"))?.into())
+        .get_string(&jni::objects::JString::from(
+            text_str.l().map_err(|e| format!("get_string: {e}"))?,
+        ))
         .map_err(|e| format!("get_string: {e}"))?
         .into();
 
@@ -228,7 +230,9 @@ fn get_content_description(env: &mut JNIEnv, node: &JObject) -> Result<String, S
         .map_err(|e| format!("toString failed: {e}"))?;
 
     let s: String = env
-        .get_string(&desc_str.l().map_err(|e| format!("get_string: {e}"))?.into())
+        .get_string(&jni::objects::JString::from(
+            desc_str.l().map_err(|e| format!("get_string: {e}"))?,
+        ))
         .map_err(|e| format!("get_string: {e}"))?
         .into();
 

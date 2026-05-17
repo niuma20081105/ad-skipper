@@ -1,5 +1,5 @@
 use jni::JNIEnv;
-use jni::objects::{JObject, JValue};
+use jni::objects::JObject;
 use serde::{Deserialize, Serialize};
 
 const PREFS_NAME: &str = "ad_skipper_prefs";
@@ -156,7 +156,7 @@ fn get_string(
         return Ok(default.to_string());
     }
     let s: String = env
-        .get_string(&jobj.into())
+        .get_string(&jni::objects::JString::from(jobj))
         .map_err(|e| format!("get_string: {e}"))?
         .into();
     Ok(s)
