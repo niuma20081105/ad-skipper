@@ -1,0 +1,25 @@
+# Rust
+rust/target/
+
+# Android
+app/build/
+app/src/main/jniLibs/
+*.apk
+*.aab
+
+# Gradle
+.gradle/
+gradle/wrapper/gradle-wrapper.jar
+gradlew
+!gradlew.bat
+build/
+local.properties
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
