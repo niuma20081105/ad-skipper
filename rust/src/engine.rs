@@ -121,7 +121,8 @@ fn node_text(env: &mut JNIEnv, node: &JObject) -> Result<String, String> {
     if obj.is_null() { return Ok(String::new()); }
     let s = env.call_method(obj, "toString", "()Ljava/lang/String;", &[])
         .map_err(|e| format!("toString: {e}"))?;
-    let jstr = unsafe { jni::objects::JString::from_raw(s.l().map_err(|e| format!("l: {e}"))?.into_raw()) };
+    let jobj = s.l().map_err(|e| format!("l: {e}"))?;
+    let jstr = jni::objects::JString::from(jobj);
     Ok(env.get_string(&jstr).map_err(|e| format!("get_string: {e}"))?.into())
 }
 
@@ -132,7 +133,8 @@ fn node_desc(env: &mut JNIEnv, node: &JObject) -> Result<String, String> {
     if obj.is_null() { return Ok(String::new()); }
     let s = env.call_method(obj, "toString", "()Ljava/lang/String;", &[])
         .map_err(|e| format!("toString: {e}"))?;
-    let jstr = unsafe { jni::objects::JString::from_raw(s.l().map_err(|e| format!("l: {e}"))?.into_raw()) };
+    let jobj = s.l().map_err(|e| format!("l: {e}"))?;
+    let jstr = jni::objects::JString::from(jobj);
     Ok(env.get_string(&jstr).map_err(|e| format!("get_string: {e}"))?.into())
 }
 

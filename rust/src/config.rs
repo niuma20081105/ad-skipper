@@ -77,10 +77,8 @@ fn pref_str(env: &mut JNIEnv, prefs: &JObject, k: &str, d: &str) -> Result<Strin
         .map_err(|e| format!("getString: {e}"))?;
     let obj = val.l().map_err(|e| format!("l: {e}"))?;
     if obj.is_null() { return Ok(d.to_string()); }
-    unsafe {
-        let jstr = jni::objects::JString::from_raw(obj.into_raw());
-        Ok(env.get_string(&jstr).map_err(|e| format!("gs: {e}"))?.into())
-    }
+    let jstr = jni::objects::JString::from(obj);
+    Ok(env.get_string(&jstr).map_err(|e| format!("gs: {e}"))?.into())
 }
 
 fn pref_long(env: &mut JNIEnv, prefs: &JObject, k: &str, d: i64) -> Result<i64, String> {
