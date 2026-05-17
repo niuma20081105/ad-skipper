@@ -1,5 +1,5 @@
 use jni::JNIEnv;
-use jni::objects::{JObject, JString};
+use jni::objects::JObject;
 use log::{info, debug, warn};
 use regex::RegexSet;
 use std::time::{Duration, Instant};
@@ -7,13 +7,7 @@ use std::time::{Duration, Instant};
 use crate::config::AppConfig;
 
 const DEFAULT_KEYWORDS: &[&str] = &[
-    r"跳过",
-    r"SKIP",
-    r"Skip",
-    r"跳過",
-    r"关闭",
-    r"Close",
-    r"×",
+    r"跳过", r"SKIP", r"Skip", r"跳過", r"关闭", r"Close", r"×",
 ];
 
 const ACTION_CLICK: i32 = 16;
@@ -30,7 +24,6 @@ impl AdEngine {
     pub fn new() -> Self {
         let patterns: Vec<&str> = DEFAULT_KEYWORDS.iter().copied().collect();
         let keyword_set = RegexSet::new(&patterns).expect("Failed to compile keyword regex");
-
         AdEngine {
             last_process_time: Instant::now(),
             cooldown_ms: 50,
@@ -46,210 +39,129 @@ impl AdEngine {
         } else {
             config.keywords.clone()
         };
-        self.keyword_set =
-            RegexSet::new(&patterns).expect("Failed to compile keyword regex");
+        self.keyword_set = RegexSet::new(&patterns).expect("Failed to compile keyword regex");
         self.config = config;
     }
 
     pub fn process(
         &mut self,
         env: &mut JNIEnv,
-        root: JObject,
+        root: &JObject,
         package: &str,
     ) -> Result<Option<String>, String> {
-        if !self.config.enabled {
-            return Ok(None);
-        }
-        if self.config.app_blacklist.iter().any(|a| a == package) {
-            return Ok(None);
-        }
+        if !self.config.enabled { return Ok(None); }
+        if self.config.app_blacklist.iter().any(|a| a == package) { return Ok(None); }
         if !self.config.app_whitelist.is_empty()
-            && !self.config.app_whitelist.iter().any(|a| a == package)
-        {
-            return Ok(None);
-        }
+            && !self.config.app_whitelist.iter().any(|a| a == package) { return Ok(None); }
         let elapsed = self.last_process_time.elapsed();
-        if elapsed < Duration::from_millis(self.cooldown_ms) {
-            return Ok(None);
-        }
+        if elapsed < Duration::from_millis(self.cooldown_ms) { return Ok(None); }
         self.last_process_time = Instant::now();
 
         debug!("Processing window: package={}", package);
-
         match self.traverse_node(env, root, 0) {
-            Ok(Some(keyword)) => {
+            Ok(Some(kw)) => {
                 self.match_count += 1;
-                info!(
-                    "Skip button clicked in [{}] matched='{}' (total: {})",
-                    package, keyword, self.match_count
-                );
-                Ok(Some(keyword))
+                info!("Clicked skip in [{}] matched='{}' (total: {})", package, kw, self.match_count);
+                Ok(Some(kw))
             }
-            Ok(None) => {
-                debug!("No skip button found in [{}]", package);
-                Ok(None)
-            }
-            Err(e) => {
-                warn!("Traversal error in [{}]: {}", package, e);
-                Err(e)
-            }
+            Ok(None) => { debug!("No skip in [{}]", package); Ok(None) }
+            Err(e) => { warn!("Traversal error in [{}]: {}", package, e); Err(e) }
         }
     }
 
     fn traverse_node(
         &self,
         env: &mut JNIEnv,
-        node: JObject,
+        node: &JObject,
         depth: u32,
     ) -> Result<Option<String>, String> {
-        if depth > 50 {
-            return Ok(None);
-        }
+        if depth > 50 { return Ok(None); }
 
-        let text = get_node_text(env, node).unwrap_or_default();
-        let content_desc = get_content_description(env, node).unwrap_or_default();
-        let combined = format!("{} {}", text, content_desc);
+        let text = node_text(env, node).unwrap_or_default();
+        let desc = node_desc(env, node).unwrap_or_default();
+        let combined = format!("{} {}", text, desc);
 
         if !combined.trim().is_empty() && self.keyword_set.is_match(&combined) {
-            debug!(
-                "Matched node: text='{}' desc='{}' depth={}",
-                text, content_desc, depth
-            );
+            let kw = combined.trim().to_string();
+            debug!("Matched: '{}' depth={}", kw, depth);
 
-            let keyword = combined.trim().to_string();
-
-            if is_node_clickable(env, node).unwrap_or(false) {
-                match perform_click(env, node) {
-                    Ok(true) => {
-                        info!("Clicked skip button: '{}'", keyword);
-                        return Ok(Some(keyword));
-                    }
-                    Ok(false) => debug!("Click performed but returned false"),
-                    Err(e) => warn!("Click failed: {}", e),
+            if node_clickable(env, node).unwrap_or(false) {
+                if let Ok(true) = do_click(env, node) {
+                    info!("Clicked: '{}'", kw);
+                    return Ok(Some(kw));
                 }
-            } else {
-                debug!("Node not clickable, trying parent");
-                if let Ok(parent) = get_parent(env, node) {
-                    if is_node_clickable(env, parent).unwrap_or(false) {
-                        match perform_click(env, parent) {
-                            Ok(true) => {
-                                info!("Clicked parent of skip button: '{}'", keyword);
-                                return Ok(Some(keyword));
-                            }
-                            _ => {}
-                        }
+            } else if let Ok(parent) = node_parent(env, node) {
+                if node_clickable(env, &parent).unwrap_or(false) {
+                    if let Ok(true) = do_click(env, &parent) {
+                        info!("Clicked parent of: '{}'", kw);
+                        return Ok(Some(kw));
                     }
                 }
             }
         }
 
-        let child_count = get_child_count(env, node).unwrap_or(0);
-        for i in 0..child_count {
-            match get_child(env, node, i) {
-                Ok(child) => {
-                    if let Some(keyword) = self.traverse_node(env, child, depth + 1)? {
-                        return Ok(Some(keyword));
-                    }
+        let n = child_count(env, node).unwrap_or(0);
+        for i in 0..n {
+            if let Ok(child) = get_child(env, node, i) {
+                if let Some(kw) = self.traverse_node(env, &child, depth + 1)? {
+                    return Ok(Some(kw));
                 }
-                Err(_) => continue,
             }
         }
-
         Ok(None)
     }
 }
 
-// ─── JNI 辅助函数 — 全部用 JObject 值传递 (jni 0.21 要求 Into<JObject>) ─────
+// ─── JNI helpers (jni 0.20: &JObject works in call_method) ─────
 
-fn get_node_text(env: &mut JNIEnv, node: JObject) -> Result<String, String> {
-    let text_obj = env
-        .call_method(node, "getText", "()Ljava/lang/CharSequence;", &[])
-        .map_err(|e| format!("getText failed: {e}"))?;
-
-    let text_jobj = match text_obj.l() {
-        Ok(jobj) => jobj,
-        Err(_) => return Ok(String::new()),
-    };
-    if text_jobj.is_null() {
-        return Ok(String::new());
-    }
-
-    let text_str = env
-        .call_method(text_jobj, "toString", "()Ljava/lang/String;", &[])
-        .map_err(|e| format!("toString failed: {e}"))?;
-
-    let s: String = env
-        .get_string(&JString::from(
-            text_str.l().map_err(|e| format!("get_string: {e}"))?,
-        ))
-        .map_err(|e| format!("get_string: {e}"))?
-        .into();
-
-    Ok(s)
+fn node_text(env: &mut JNIEnv, node: &JObject) -> Result<String, String> {
+    let v = env.call_method(node, "getText", "()Ljava/lang/CharSequence;", &[])
+        .map_err(|e| format!("getText: {e}"))?;
+    let obj = match v.l() { Ok(o) => o, Err(_) => return Ok(String::new()) };
+    if obj.is_null() { return Ok(String::new()); }
+    let s = env.call_method(obj, "toString", "()Ljava/lang/String;", &[])
+        .map_err(|e| format!("toString: {e}"))?;
+    let jstr = unsafe { jni::objects::JString::from_raw(s.l().map_err(|e| format!("l: {e}"))?.into_raw()) };
+    Ok(env.get_string(&jstr).map_err(|e| format!("get_string: {e}"))?.into())
 }
 
-fn get_content_description(env: &mut JNIEnv, node: JObject) -> Result<String, String> {
-    let desc_obj = env
-        .call_method(node, "getContentDescription", "()Ljava/lang/CharSequence;", &[])
-        .map_err(|e| format!("getContentDescription failed: {e}"))?;
-
-    let desc_jobj = match desc_obj.l() {
-        Ok(jobj) => jobj,
-        Err(_) => return Ok(String::new()),
-    };
-    if desc_jobj.is_null() {
-        return Ok(String::new());
-    }
-
-    let desc_str = env
-        .call_method(desc_jobj, "toString", "()Ljava/lang/String;", &[])
-        .map_err(|e| format!("toString failed: {e}"))?;
-
-    let s: String = env
-        .get_string(&JString::from(
-            desc_str.l().map_err(|e| format!("get_string: {e}"))?,
-        ))
-        .map_err(|e| format!("get_string: {e}"))?
-        .into();
-
-    Ok(s)
+fn node_desc(env: &mut JNIEnv, node: &JObject) -> Result<String, String> {
+    let v = env.call_method(node, "getContentDescription", "()Ljava/lang/CharSequence;", &[])
+        .map_err(|e| format!("getDesc: {e}"))?;
+    let obj = match v.l() { Ok(o) => o, Err(_) => return Ok(String::new()) };
+    if obj.is_null() { return Ok(String::new()); }
+    let s = env.call_method(obj, "toString", "()Ljava/lang/String;", &[])
+        .map_err(|e| format!("toString: {e}"))?;
+    let jstr = unsafe { jni::objects::JString::from_raw(s.l().map_err(|e| format!("l: {e}"))?.into_raw()) };
+    Ok(env.get_string(&jstr).map_err(|e| format!("get_string: {e}"))?.into())
 }
 
-fn is_node_clickable(env: &mut JNIEnv, node: JObject) -> Result<bool, String> {
-    let clickable = env
-        .call_method(node, "isClickable", "()Z", &[])
-        .map_err(|e| format!("isClickable failed: {e}"))?;
-    Ok(clickable.z().unwrap_or(false))
+fn node_clickable(env: &mut JNIEnv, node: &JObject) -> Result<bool, String> {
+    let v = env.call_method(node, "isClickable", "()Z", &[])
+        .map_err(|e| format!("isClickable: {e}"))?;
+    Ok(v.z().unwrap_or(false))
 }
 
-fn get_child_count(env: &mut JNIEnv, node: JObject) -> Result<i32, String> {
-    let count = env
-        .call_method(node, "getChildCount", "()I", &[])
-        .map_err(|e| format!("getChildCount failed: {e}"))?;
-    Ok(count.i().unwrap_or(0))
+fn child_count(env: &mut JNIEnv, node: &JObject) -> Result<i32, String> {
+    let v = env.call_method(node, "getChildCount", "()I", &[])
+        .map_err(|e| format!("childCount: {e}"))?;
+    Ok(v.i().unwrap_or(0))
 }
 
-fn get_child<'a>(
-    env: &'a mut JNIEnv,
-    node: JObject,
-    index: i32,
-) -> Result<JObject<'a>, String> {
-    let child = env
-        .call_method(node, "getChild", "(I)Landroid/view/accessibility/AccessibilityNodeInfo;", &[index.into()])
-        .map_err(|e| format!("getChild({}) failed: {}", index, e))?;
-    child.l().map_err(|e| format!("getChild l(): {e}"))
+fn get_child<'a>(env: &'a mut JNIEnv, node: &JObject, idx: i32) -> Result<JObject<'a>, String> {
+    env.call_method(node, "getChild", "(I)Landroid/view/accessibility/AccessibilityNodeInfo;", &[idx.into()])
+        .map_err(|e| format!("getChild: {e}"))?
+        .l().map_err(|e| format!("getChild l: {e}"))
 }
 
-fn get_parent<'a>(env: &'a mut JNIEnv, node: JObject) -> Result<JObject<'a>, String> {
-    let parent = env
-        .call_method(node, "getParent", "()Landroid/view/accessibility/AccessibilityNodeInfo;", &[])
-        .map_err(|e| format!("getParent failed: {e}"))?;
-    parent.l().map_err(|e| format!("getParent l(): {e}"))
+fn node_parent<'a>(env: &'a mut JNIEnv, node: &JObject) -> Result<JObject<'a>, String> {
+    env.call_method(node, "getParent", "()Landroid/view/accessibility/AccessibilityNodeInfo;", &[])
+        .map_err(|e| format!("getParent: {e}"))?
+        .l().map_err(|e| format!("getParent l: {e}"))
 }
 
-fn perform_click(env: &mut JNIEnv, node: JObject) -> Result<bool, String> {
-    let result = env
-        .call_method(node, "performAction", "(I)Z", &[(ACTION_CLICK).into()])
-        .map_err(|e| format!("performAction(CLICK) failed: {e}"))?;
-    Ok(result.z().unwrap_or(false))
+fn do_click(env: &mut JNIEnv, node: &JObject) -> Result<bool, String> {
+    env.call_method(node, "performAction", "(I)Z", &[(ACTION_CLICK).into()])
+        .map_err(|e| format!("performAction: {e}"))
+        .map(|v| v.z().unwrap_or(false))
 }

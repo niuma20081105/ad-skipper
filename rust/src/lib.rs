@@ -58,7 +58,7 @@ pub extern "system" fn Java_com_adskipper_MainService_nativeHandleEvent(
         }
     };
 
-    match engine.process(&mut env, root_node, &pkg) {
+    match engine.process(&mut env, &root_node, &pkg) {
         Ok(Some(keyword)) => {
             // 记录跳过日志
             if let Ok(mut logger) = get_logger().lock() {
@@ -79,7 +79,7 @@ pub extern "system" fn Java_com_adskipper_MainActivity_nativeGetConfig(
     _class: JClass,
     context: JObject,
 ) -> jstring {
-    let config = config::load_config(&mut env, context).unwrap_or_default();
+    let config = config::load_config(&mut env, &context).unwrap_or_default();
     let json = serde_json::to_string(&config).unwrap_or_default();
     env.new_string(json)
         .map(|s| s.into_raw())
@@ -94,9 +94,9 @@ pub extern "system" fn Java_com_adskipper_MainActivity_nativeSetEnabled(
     context: JObject,
     enabled: jni::sys::jboolean,
 ) {
-    let mut config = config::load_config(&mut env, context).unwrap_or_default();
+    let mut config = config::load_config(&mut env, &context).unwrap_or_default();
     config.enabled = enabled != 0;
-    let _ = config::save_config(&mut env, context, &config);
+    let _ = config::save_config(&mut env, &context, &config);
 
     // 同步更新引擎
     if let Ok(mut engine) = get_engine().lock() {
