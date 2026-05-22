@@ -24,16 +24,20 @@ jobs:
         with:
           packages: 'platforms;android-34 build-tools;34.0.0'
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: '8.5'
-
-      - name: Generate Gradle Wrapper
-        run: gradle wrapper --gradle-version 8.5
+      - name: Download Gradle
+        run: |
+          echo "Downloading Gradle 8.5..."
+          curl -sSfL --retry 3 --retry-delay 10 \
+            "https://services.gradle.org/distributions/gradle-8.5-bin.zip" \
+            -o /tmp/gradle.zip
+          echo "Extracting..."
+          unzip -q /tmp/gradle.zip -d /tmp/gradle-install
+          echo "Gradle ready"
 
       - name: Build APK
-        run: ./gradlew assembleDebug --stacktrace
+        run: |
+          export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT}}"
+          /tmp/gradle-install/gradle-8.5/bin/gradle assembleDebug --no-daemon --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
