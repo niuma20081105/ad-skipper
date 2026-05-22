@@ -24,11 +24,13 @@ jobs:
         with:
           packages: 'platforms;android-34 build-tools;34.0.0'
 
-      - name: Install Gradle & Generate Wrapper
-        run: |
-          wget -q "https://services.gradle.org/distributions/gradle-8.5-bin.zip" -O /tmp/gradle.zip
-          unzip -q /tmp/gradle.zip -d /tmp/
-          /tmp/gradle-8.5/bin/gradle wrapper --gradle-version 8.5
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.5'
+
+      - name: Generate Gradle Wrapper
+        run: gradle wrapper --gradle-version 8.5
 
       - name: Build APK
         run: ./gradlew assembleDebug --stacktrace
